@@ -1,0 +1,16 @@
+# Web / REST
+Django>=5.2,<5.3                # LTS（2028年4月までサポート）
+djangorestframework>=3.16,<3.17
+whitenoise>=6.8,<7              # 本番での管理画面の静的ファイル配信
+
+# WebSocket / ASGI
+channels>=4.2,<5                # Django に WebSocket（Consumer・ルーティング・channel layer）を足す
+channels-redis>=4.2,<5          # channel layer の Redis 実装（プロセス間のメッセージバス）
+uvicorn[standard]>=0.32,<1      # ASGI サーバー。[standard] に WebSocket 実装（websockets）と uvloop が含まれる
+
+# データストア
+psycopg[binary]>=3.2,<4         # PostgreSQL ドライバ（psycopg3）
+redis>=5.2,<7                   # プレゼンス管理で Redis を直接操作する（redis.asyncio）
+
+# ファイル
+boto3>=1.35,<2                  # S3 / MinIO の署名付き URL の発行と HEAD/DELETE

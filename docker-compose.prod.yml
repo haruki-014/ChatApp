@@ -1,0 +1,34 @@
+# 本番の参考構成（EC2 1台で動かす場合）。
+#   ALB(HTTPS, ACM) → EC2[nginx → backend(Uvicorn)] → RDS PostgreSQL / ElastiCache Redis / S3
+# デプロイ:
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml run --rm backend python manage.py migrate
+#   docker compose -f docker-compose.prod.yml up -d
+name: pyslack-prod
+
+x-backend: &backend
+  build:
+    context: ./backend
+    target: prod
+  env_file: .env.prod # DB=RDS, REDIS_URL=ElastiCache, S3 のエンドポイント指定なし（AWS 本物を使う）
+  restart: unless-stopped
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "80:80" # ALB のターゲットグループからだけ受け付ける（セキュリティグループで制限する）
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    <<: *backend
+    expose:
+      - "8000" # nginx からのみ到達できる（ホストには公開しない）
+
+  presence-sweeper:
+    <<: *backend
+    command: python manage.py presence_sweeper

@@ -1,0 +1,95 @@
+# 開発環境。使い方: cp .env.example .env && docker compose up --build
+# ブラウザからは http://localhost:5173 だけを開く（/api と /ws は Vite が backend へ中継する）
+name: pyslack
+
+# backend と presence-sweeper で共通の設定（YAML アンカー）
+x-backend: &backend
+  build:
+    context: ./backend
+    target: dev
+  env_file: .env
+  volumes:
+    - ./backend:/app # ソースをマウントし、uvicorn --reload で即時に反映する
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # ホストから psql / GUI ツールで見るため（任意）
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379" # redis-cli で channel layer やプレゼンスの中身を覗くため（任意）
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    # 公式の minio/minio イメージは配布が停止されたため、Bitnami の凍結版をバージョン固定で使う（開発専用）
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
+      MINIO_DEFAULT_BUCKETS: ${AWS_STORAGE_BUCKET_NAME} # 起動時にバケットを自動作成する（既にあれば何もしない）
+      # ブラウザから直接アップロードするため（127.0.0.1 は「別ユーザーで同時ログイン」の動作確認用）
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - miniodata:/bitnami/minio/data
+    ports:
+      - "9000:9000" # S3 API（ブラウザが署名付き URL で直接アクセスする）
+      - "9001:9001" # 管理コンソール（http://localhost:9001）
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    <<: *backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-dir /app"
+    ports:
+      - "8000:8000" # デバッグ用。普段は 5173 経由でアクセスする（同一オリジンにするため）
+
+  # Redis 上のプレゼンス情報の掃除役（クラッシュした接続を offline にする。4-6 を参照）
+  presence-sweeper:
+    <<: *backend
+    command: python manage.py presence_sweeper
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000 # Vite の proxy の転送先（コンテナ間通信なのでサービス名で指定）
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # ホスト（macOS）の node_modules でコンテナ（Linux）の node_modules を上書きしない
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  miniodata:

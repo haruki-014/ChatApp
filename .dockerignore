@@ -1,0 +1,7 @@
+# ルートをビルドコンテキストにする nginx/Dockerfile 用
+**/node_modules
+**/dist
+**/__pycache__
+.env
+.env.*
+!.env.example
